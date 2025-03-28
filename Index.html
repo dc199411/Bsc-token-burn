@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BSC Token Burner</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/web3/4.0.3/web3.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700&display=swap');
+
+        body {
+            font-family: 'Orbitron', sans-serif;
+            text-align: center;
+            background: #0a0a0a;
+            color: #00ffcc;
+            padding: 20px;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+        }
+
+        .container {
+            background: rgba(255, 255, 255, 0.1);
+            padding: 20px;
+            border-radius: 15px;
+            box-shadow: 0 0 20px rgba(0, 255, 204, 0.5);
+            width: 90%;
+            max-width: 600px;
+            backdrop-filter: blur(10px);
+        }
+
+        h1 {
+            font-size: 24px;
+            text-shadow: 0 0 10px #00ffcc;
+        }
+
+        button {
+            background: linear-gradient(45deg, #00ffcc, #008080);
+            border: none;
+            color: #fff;
+            font-size: 16px;
+            padding: 12px 20px;
+            margin: 10px;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: 0.3s;
+            box-shadow: 0 0 10px rgba(0, 255, 204, 0.7);
+        }
+
+        button:hover {
+            background: linear-gradient(45deg, #00ccff, #006666);
+            box-shadow: 0 0 15px rgba(0, 255, 255, 1);
+            transform: scale(1.05);
+        }
+
+        #token-list {
+            margin-top: 20px;
+            text-align: left;
+            max-width: 500px;
+            margin: auto;
+            padding: 15px;
+            border-radius: 10px;
+            background: rgba(255, 255, 255, 0.05);
+            box-shadow: 0 0 10px rgba(0, 255, 204, 0.3);
+        }
+
+        p {
+            font-size: 14px;
+            margin: 10px 0;
+        }
+
+        #status {
+            margin-top: 20px;
+            font-weight: bold;
+            color: #ff4444;
+            text-shadow: 0 0 10px #ff4444;
+        }
+
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>🔥 BSC Token Burner 🔥</h1>
+        <button onclick="connectWallet()">Connect Wallet</button>
+        <button onclick="burnAllTokens()">Burn All Tokens</button>
+        <p id="wallet-address">Wallet: Not Connected</p>
+        <div id="token-list"></div>
+        <p id="status"></p>
+    </div>
+
+    <script>
+        let web3;
+        let account;
+        const BURN_ADDRESS = "0x000000000000000000000000000000000000dEaD";
+        const BSCSCAN_API_KEY = "YOUR_BSCSCAN_API_KEY";
+
+        async function connectWallet() {
+            if (window.ethereum) {
+                web3 = new Web3(window.ethereum);
+                await window.ethereum.request({ method: "eth_requestAccounts" });
+                const accounts = await web3.eth.getAccounts();
+                account = accounts[0];
+                document.getElementById("wallet-address").innerText = `Wallet: ${account}`;
+                fetchTokens();
+            } else {
+                alert("Please install MetaMask to use this dApp.");
+            }
+        }
+
+        async function fetchTokens() {
+            const url = `https://api.bscscan.com/api?module=account&action=tokentx&address=${account}&apikey=${BSCSCAN_API_KEY}`;
+            const response = await fetch(url);
+            const data = await response.json();
+            
+            if (data.status !== "1") return alert("Error fetching tokens.");
+            
+            let tokens = new Set(data.result.map(tx => tx.contractAddress));
+            let tokenListHtml = "<h3>Tokens Found:</h3>";
+
+            for (let token of tokens) {
+                const balance = await getTokenBalance(token);
+                if (balance > 0) {
+                    tokenListHtml += `<p>${token}: ${balance}</p>`;
+                }
+            }
+
+            document.getElementById("token-list").innerHTML = tokenListHtml;
+        }
+
+        async function getTokenBalance(tokenAddress) {
+            const tokenContract = new web3.eth.Contract([
+                { "constant": true, "inputs": [{ "name": "_owner", "type": "address" }], "name": "balanceOf", "outputs": [{ "name": "", "type": "uint256" }], "type": "function" }
+            ], tokenAddress);
+            return await tokenContract.methods.balanceOf(account).call();
+        }
+
+        async function burnTokens(tokenAddress, balance) {
+            const tokenContract = new web3.eth.Contract([
+                { "constant": false, "inputs": [{ "name": "_to", "type": "address" }, { "name": "_value", "type": "uint256" }], "name": "transfer", "outputs": [{ "name": "", "type": "bool" }], "type": "function" }
+            ], tokenAddress);
+
+            const gasPrice = await web3.eth.getGasPrice();
+
+            const tx = {
+                from: account,
+                to: tokenAddress,
+                gas: 100000,
+                gasPrice: gasPrice,
+                data: tokenContract.methods.transfer(BURN_ADDRESS, balance).encodeABI()
+            };
+
+            try {
+                const txHash = await window.ethereum.request({
+                    method: "eth_sendTransaction",
+                    params: [tx],
+                });
+                document.getElementById("status").innerText = `Burned: ${tokenAddress} | Tx: ${txHash}`;
+            } catch (error) {
+                console.error(error);
+                document.getElementById("status").innerText = `Error burning ${tokenAddress}`;
+            }
+        }
+
+        async function burnAllTokens() {
+            document.getElementById("status").innerText = "Burning all tokens...";
+            const url = `https://api.bscscan.com/api?module=account&action=tokentx&address=${account}&apikey=${BSCSCAN_API_KEY}`;
+            const response = await fetch(url);
+            const data = await response.json();
+            
+            if (data.status !== "1") return alert("Error fetching tokens.");
+            
+            let tokens = new Set(data.result.map(tx => tx.contractAddress));
+
+            for (let token of tokens) {
+                const balance = await getTokenBalance(token);
+                if (balance > 0) {
+                    await burnTokens(token, balance);
+                }
+            }
+
+            document.getElementById("status").innerText = "All tokens burned!";
+        }
+    </script>
+
+</body>
+</html>
